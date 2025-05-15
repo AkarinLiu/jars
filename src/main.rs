@@ -111,6 +111,18 @@ fn get_download_url(version: &str, provider: &str) -> Result<String, JarsError> 
             "https://api.azul.com/zulu/download/community/v1.0/bundles/latest/?jdk_version={}&os={}&arch={}&ext=zip",
             version, os, arch
         )),
+        "openjdk" => Ok(format!(
+            "https://download.java.net/java/GA/jdk{}/binaries/openjdk-{}-bin-{}.tar.gz",
+            version, version, os
+        )),
+        "graalvm" => Ok(format!(
+            "https://download.oracle.com/graalvm/{}/latest/graalvm-jdk-{}_{}-{}_bin.zip",
+            version, version, os, arch
+        )),
+        "liberica" => Ok(format!(
+            "https://download.bell-sw.com/liberica/{}/bellsoft-jdk{}-linux-{}.tar.gz",
+            version, version, os
+        )),
         _ => Err(JarsError::DownloadError(format!("Unsupported JDK provider: {}", provider)))
     }
 }
