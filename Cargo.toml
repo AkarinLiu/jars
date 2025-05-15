@@ -1,0 +1,13 @@
+[package]
+name = "jars"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.0.33", features = ["derive"] }
+dirs = "4.0.0"
+reqwest = { version = "0.11.0", features = ["blocking", "json"] }
+zip = "0.6.0"
+winreg = "0.10.0"
+indicatif = "0.17.0"
+thiserror = "1.0.0"
