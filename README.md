@@ -71,3 +71,6 @@ cargo build --release
 ```
 
 构建结果位于`target/release/jars`(或Windows上的`jars.exe`)
+
+## 鸣谢
+[DeepSeek](https://deepseek.com)
