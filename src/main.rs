@@ -41,6 +41,13 @@ enum Commands {
     /// Install a new Java version
     Install {
         version: String,
+        /// JDK provider (temurin, corretto, zulu, etc.)
+        #[arg(short, long, default_value = "temurin")]
+        provider: String,
+    },
+    /// Remove an installed Java version
+    Delete {
+        version: String,
     },
 }
 
@@ -87,29 +94,41 @@ fn detect_system_java() -> Vec<String> {
     versions
 }
 
-fn get_download_url(version: &str) -> Result<String, JarsError> {
+fn get_download_url(version: &str, provider: &str) -> Result<String, JarsError> {
     let os = if cfg!(windows) { "windows" } else if cfg!(target_os = "macos") { "mac" } else { "linux" };
     let arch = if cfg!(target_arch = "x86_64") { "x64" } else { "aarch64" };
     
-    Ok(format!(
-        "https://api.adoptium.net/v3/binary/latest/{}/ga/{}/{}/jdk/hotspot/normal/eclipse?project=jdk",
-        version, os, arch
-    ))
+    match provider.to_lowercase().as_str() {
+        "temurin" => Ok(format!(
+            "https://api.adoptium.net/v3/binary/latest/{}/ga/{}/{}/jdk/hotspot/normal/eclipse?project=jdk",
+            version, os, arch
+        )),
+        "corretto" => Ok(format!(
+            "https://corretto.aws/downloads/latest/amazon-corretto-{}-{}-{}.tar.gz",
+            version, arch, os
+        )),
+        "zulu" => Ok(format!(
+            "https://api.azul.com/zulu/download/community/v1.0/bundles/latest/?jdk_version={}&os={}&arch={}&ext=zip",
+            version, os, arch
+        )),
+        _ => Err(JarsError::DownloadError(format!("Unsupported JDK provider: {}", provider)))
+    }
 }
 
-fn install_java(version: &str) -> Result<(), JarsError> {
+fn install_java(version: &str, provider: &str) -> Result<(), JarsError> {
     let versions_dir = get_versions_dir();
-    let target_dir = versions_dir.join(version);
+    let full_version = format!("{}-{}", provider, version);
+    let target_dir = versions_dir.join(&full_version);
     
     if !target_dir.exists() {
         fs::create_dir_all(&target_dir)?;
     }
     
     let pb = ProgressBar::new(100);
-    pb.set_message(format!("Downloading Java {}", version));
+    pb.set_message(format!("Downloading Java {} from {}", version, provider));
     
     // Get download URL
-    let url = get_download_url(version)?;
+    let url = get_download_url(version, provider)?;
     let response = reqwest::blocking::get(&url)
         .map_err(|e| JarsError::DownloadError(e.to_string()))?;
     
@@ -151,7 +170,7 @@ fn install_java(version: &str) -> Result<(), JarsError> {
         pb.set_position((i as u64 * 100 / archive_len as u64) as u64);
     }
     
-    pb.finish_with_message(format!("Java {} installed successfully", version));
+    pb.finish_with_message(format!("Java {} from {} installed successfully", version, provider));
     Ok(())
 }
 
@@ -160,7 +179,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Use { version } => {
-            let java_path = get_versions_dir().join(&version).join("bin").join("java");
+            // Check if version already includes provider prefix
+            // Try exact match first
+            let mut java_path = get_versions_dir().join(&version).join("bin").join("java");
+            
+            // If not found, try with temurin prefix
+            if !java_path.exists() && !version.contains('-') {
+                let temurin_version = format!("temurin-{}", version);
+                java_path = get_versions_dir().join(&temurin_version).join("bin").join("java");
+                if java_path.exists() {
+                    env::set_var("JAVA_HOME", get_versions_dir().join(&temurin_version));
+                    let path_sep = if cfg!(windows) { ";" } else { ":" };
+                    env::set_var(
+                        "PATH", 
+                        format!("{}{}{}", java_path.parent().unwrap().display(), path_sep, env::var("PATH")?)
+                    );
+                    println!("Now using Java version {}", version);
+                    return Ok(());
+                }
+            }
             
             if !java_path.exists() {
                 return Err(Box::new(JarsError::VersionNotFound(version)));
@@ -193,24 +230,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 println!("Available Java versions:");
                 for version in versions {
-                    println!("- {}", version);
+                    if version.contains('-') {
+                        let parts: Vec<&str> = version.split('-').collect();
+                        println!("- {} (Provider: {})", parts[1], parts[0]);
+                    } else {
+                        println!("- {} (System installed)", version);
+                    }
                 }
             }
         }
         Commands::Current => {
             if let Ok(java_home) = env::var("JAVA_HOME") {
-                let version = Path::new(&java_home)
+                let full_version = Path::new(&java_home)
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("unknown");
-                println!("Current Java version: {}", version);
+                
+                if full_version.contains('-') {
+                    let parts: Vec<&str> = full_version.split('-').collect();
+                    println!("Current Java version: {} (Provider: {})", parts[1], parts[0]);
+                } else {
+                    println!("Current Java version: {} (System installed)", full_version);
+                }
             } else {
                 println!("No Java version set");
             }
         }
-        Commands::Install { version } => {
-            install_java(&version)?;
-            println!("Successfully installed Java {}", version);
+        Commands::Install { version, provider } => {
+            install_java(&version, &provider)?;
+            println!("Successfully installed Java {} from {}", version, provider);
+        }
+        Commands::Delete { version } => {
+            // Try exact match first
+            let mut target_dir = get_versions_dir().join(&version);
+            
+            // If not found, try with temurin prefix
+            if !target_dir.exists() && !version.contains('-') {
+                let temurin_version = format!("temurin-{}", version);
+                target_dir = get_versions_dir().join(&temurin_version);
+                if !target_dir.exists() {
+                    return Err(Box::new(JarsError::VersionNotFound(version)));
+                }
+                fs::remove_dir_all(&target_dir)?;
+                println!("Successfully removed Java version {}", temurin_version);
+                return Ok(());
+            }
+            
+            if !target_dir.exists() {
+                return Err(Box::new(JarsError::VersionNotFound(version)));
+            }
+            
+            fs::remove_dir_all(&target_dir)?;
+            println!("Successfully removed Java version {}", version);
         }
     }
     

@@ -72,5 +72,11 @@ cargo build --release
 
 构建结果位于`target/release/jars`(或Windows上的`jars.exe`)
 
+## TODO
+
+- [x] Temurin JDK 的安装
+- [ ] 其他 JDK 的支持（例如 Azul 等，仅需在 jar install **version** 添加一个 --provider）
+- [ ] 一键切换 JDK 版本
+
 ## 鸣谢
 [DeepSeek](https://deepseek.com)
